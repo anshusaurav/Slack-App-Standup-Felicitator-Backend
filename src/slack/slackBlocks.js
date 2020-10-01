@@ -1,4 +1,4 @@
-const { randomGreeting, trimTitle } = require("./../graphql/helpers");
+const { randomGreeting, trimTitle, getCronAsString } = require("./../graphql/helpers");
 const blocks = context => {
     return [
         {
@@ -170,7 +170,7 @@ const standupCreateBlock = context => {
                 text: `${randomGreeting()}!!  ${context.creator_slack_id
                     } :wave: I'm pupbot, Your standup *${context.name
                     }* is now active, well done!
-        \n I have informed all participants and will will send them a DM with the questions.\t`
+        \nI have informed all participants and will will send them a DM with the questions.\t`
             }
         },
         {
@@ -180,7 +180,7 @@ const standupCreateBlock = context => {
             type: "section",
             text: {
                 type: "mrkdwn",
-                text: `*${context.name}*\nCron: ${context.cron_text} \nChannel: ${context.channel}\n`
+                text: `*${context.name}*\nTimeline: ${getCronAsString(context.cron_text)} \nChannel: ${context.channel}\n`
             },
             accessory: {
                 type: "image",
@@ -204,10 +204,8 @@ const standupNotifyBlock = context => {
             type: "section",
             text: {
                 type: "mrkdwn",
-                text: `${randomGreeting()}!! ${context.username}:wave: I'm geekbot, @${context.creator_slack_id
-                    } has created the standup *${context.name
-                    }* in Slack and I am here to help get you started.\n I will send you a DM at assigned time ${context.cron_text
-                    } \n`
+                text: `${randomGreeting()}!! ${context.username}:wave: I'm geekbot, @${context.creator_slack_id} has created the standup *${context.name}* in Slack and I am here to help get you started.
+\nI will send you a DM at assigned time ${context.cron_text} \n`
             }
         },
         {
@@ -217,7 +215,7 @@ const standupNotifyBlock = context => {
             type: "section",
             text: {
                 type: "mrkdwn",
-                text: `*${context.name}* \nCron: ${context.cron_text} \nChannel: ${context.channel}\n`
+                text: `*${context.name}* \nTimeline: ${getCronAsString(context.cron_text)} \nChannel: ${context.channel}\n`
             },
             accessory: {
                 type: "image",
@@ -241,7 +239,8 @@ const channelNotifyBlock = context => {
             type: "section",
             text: {
                 type: "mrkdwn",
-                text: `Hi there :wave: I'm pupbot, and I will be facilitating *${context.name}* created by *@${context.creator_slack_id}* in Slack.\n I will send you a DM at assigned time ${context.cron_text} \n`
+                text: `Hi there :wave: I'm pupbot, and I will be facilitating *${context.name}* created by *@${context.creator_slack_id}* in Slack.
+                \nI will send you a DM at assigned timeline ${getCronAsString(context.cron_text)} \n`
             },
             accessory: {
                 type: "image",
@@ -256,7 +255,53 @@ const channelNotifyBlock = context => {
     ];
 };
 
-const standupInitBlock = (context) => [
+const standupInitBlock = context => [
+    {
+        type: "divider"
+    },
+    {
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: `Hello :wave: ${context.username}!! another standup time *${context.name}*\n ${context.message}\n\n${context.question}`
+        }
+    },
+    {
+        type: "divider"
+    }
+];
+const standupSubsequentBlocks = context => [
+    {
+        type: "divider"
+    },
+    {
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: `${context.question}`
+        }
+    },
+    {
+        type: "divider"
+    }
+];
+
+const standupEndBlocks = () => [
+    {
+        type: "divider"
+    },
+    {
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: "Thank you for answering all questions"
+        }
+    },
+    {
+        type: "divider"
+    }
+];
+const confuseBotBlocks = () => [
     {
         type: "divider"
     },
@@ -265,7 +310,12 @@ const standupInitBlock = (context) => [
         text: {
             type: "mrkdwn",
             text:
-                `Hello :wave: ${context.username}!! another standup time ${context.name}\n ${context.message}\n\n${context.question}`
+                "I am not sure about what I should respond to that.\n\nBut I can still help you answer standup questions :sunglasses:."
+        },
+        accessory: {
+            type: "image",
+            image_url: "https://i.imgur.com/A3rBm5K.gif",
+            alt_text: "alt text for image"
         }
     },
     {
@@ -286,5 +336,8 @@ module.exports = {
     standupCreateBlock,
     standupNotifyBlock,
     channelNotifyBlock,
-    standupInitBlock
+    standupInitBlock,
+    standupSubsequentBlocks,
+    standupEndBlocks,
+    confuseBotBlocks
 };

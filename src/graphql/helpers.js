@@ -51,4 +51,26 @@ const trimTitle = (string, length) => {
     string.length > length ? string.substring(0, length - 3) + "..." : string;
   return trimmedString;
 };
-module.exports = { executeOperation, timeStamp, randomGreeting,trimTitle };
+
+const getCronAsString = (string) => {
+  const tokens = string.split(' ');
+  const min = tokens[0];
+  const hour = tokens[1];
+  const dayTokens = tokens[4].split(',').map(elem => +elem);
+  const week = ["Sun", "Mon", "Tue", "Wed", "Thur", "Fri", "Sat"];
+  let resDays = week.filter((day, index) => dayTokens.includes(index));
+  console.log(resDays);
+  let dayStr = "";
+  if (resDays.length === 1)
+    dayStr = resDays[0];
+  else if (resDays.length === 2)
+    dayStr = resDays[0] + " and " + resDays[1]
+  else {
+    for (let i = 0; i < resDays.length - 2; i++) {
+      dayStr = resDays[i] + ", ";
+    }
+    dayStr += resDays[resDays.length - 2] + " and " + resDays[resDays.length - 1];
+  }
+  return ('0' + hour).slice(-2) + ':' + ('0' + min).slice(-2) + " on " + dayStr;
+}
+module.exports = { executeOperation, timeStamp, randomGreeting, getCronAsString };

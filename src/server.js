@@ -12,7 +12,10 @@ const {
     standupCreateBlock,
     standupNotifyBlock,
     channelNotifyBlock,
-    standupInitBlock
+    standupInitBlock,
+    standupSubsequentBlocks,
+    standupEndBlocks,
+    confuseBotBlocks
 } = require("./slack/slackBlocks");
 const { executeOperation, timeStamp } = require("./graphql/helpers");
 const {
@@ -28,7 +31,14 @@ const {
     HASURA_PAUSE_STANDUP_OPERATION,
     HASURA_UNPAUSE_STANDUP_OPERATION,
     HASURA_INSERT_QUESTION_OPERATION,
-    HASURA_INSERT_RESPONSE_OPERATION
+    HASURA_INSERT_RESPONSE_OPERATION,
+    HASURA_FIND_BOTRESPONSE_OPERATION,
+    HASURA_UPDATE_RESPONSE_OPERATION,
+    HASURA_FETCH_NEXTQUESTION_OPERATION,
+    HASURA_FETCH_ACTIVEQUESTIONS_OPERATION,
+    HASURA_FETCH_QUESTION_OPERATION,
+    HASURA_UPDATE_QUESTIONWITHHIGHERINDEX_OPERATION,
+    HASURA_ARCHIVE_QUESTION_OPERATION
 } = require("./graphql/queries");
 const { openModal, submitModal } = require("./slack/slackActions");
 const { getAllMembersUsingCursor } = require("./slack/slackHelpers");
@@ -55,29 +65,110 @@ slackInteractions.action({ actionId: "open_modal_button" }, openModal);
 slackInteractions.viewSubmission("answer_modal_submit", submitModal);
 
 slackEvents.on("message", async event => {
-    //When any message is sent, check if its a bot msg or a user msg
+    //When any message is sent on user-bot channel, check if its a bot msg or a user msg
 
-    // console.log('Msg received in channel')
-    // console.log(event.channel, event);
     const { channel } = event;
+    const body = event.text;
     if (event.bot_id) {
         console.log("Bot msg");
         return;
     }
-
     console.log("User msg");
     //Fetch last 2 messages
     let res1 = await web.conversations.history({ channel, limit: 2 });
-    console.log("Getting last two messages", res1.messages);
-    if (res1.messages.length < 2) {
-        console.log("I think you have no standups");
-        return;
+    if (res1.errors || res1.messages.length < 2) {
+        return web.chat.postMessage({
+            blocks: confuseBotBlocks({}),
+            channel: event.channel
+        });
     }
     const botMsg = res1.messages[1];
-    // console.log('Bot msg', botMsg)
-    //slackuser_id, standup_id, standup_run_id, slack_timestamp_id, question_id
+    if (!res1.messages[1].bot_id) {
+        return web.chat.postMessage({
+            blocks: confuseBotBlocks({}),
+            channel: event.channel
+        });
+    }
+
     const slackuser_id = event.user;
     const slack_timestamp_id = botMsg.ts;
+    //find response with slack user id and timestamp we get from history (2nd last msg)
+    let res2 = await executeOperation(
+        {
+            slackuser_id,
+            slack_timestamp_id
+        },
+        HASURA_FIND_BOTRESPONSE_OPERATION
+    );
+
+    if (res2.errors || res2.data.response.length === 0) {
+        console.log("No matching response found");
+        return;
+    }
+
+    let res3 = await executeOperation(
+        {
+            slackuser_id,
+            standup_id: res2.data.response[0].standup_id,
+            standup_run_id: res2.data.response[0].standup_run_id,
+            question_id: res2.data.response[0].question.id,
+            body
+        },
+        HASURA_UPDATE_RESPONSE_OPERATION
+    );
+    // console.log(res3);
+    if (res3.errors) {
+        console.log("Cant update response");
+        return;
+    }
+    const index = res2.data.response[0].question.index + 1;
+    let res4 = await executeOperation(
+        {
+            standup_id: res2.data.response[0].standup_id,
+            index
+        },
+        HASURA_FETCH_NEXTQUESTION_OPERATION
+    );
+    if (res4.errors) {
+        console.log("Cant fetch next question");
+        return;
+    }
+
+    console.log("----------------------\n", res4.data.question);
+    if (!res4.data.question.length) {
+        await web.chat.postMessage({
+            blocks: standupEndBlocks({}),
+            channel: slackuser_id
+        });
+        console.log("Send thank you message");
+        return;
+    }
+
+    let res5 = await web.chat.postMessage({
+        blocks: standupSubsequentBlocks({
+            question: res4.data.question[0].body
+        }),
+        channel: slackuser_id
+    });
+    if (res5.errors) {
+        console.log("Cant send next question");
+        return;
+    }
+    let res6 = await executeOperation(
+        {
+            slackuser_id,
+            slack_timestamp_id: res5.ts,
+            standup_id: res2.data.response[0].standup_id,
+            standup_run_id: res2.data.response[0].standup_run_id,
+            question_id: res4.data.question[0].id
+        },
+        HASURA_INSERT_RESPONSE_OPERATION
+    );
+
+    if (res6.errors) {
+        console.log("Cant save response");
+    }
+    return;
 });
 slackEvents.on("app_mention", async event => {
     console.log("menioned");
@@ -94,7 +185,8 @@ slackEvents.on("app_mention", async event => {
             }
         });
 });
-// Request Handler
+
+// Request Handlers
 app.post("/insertStandup", async (req, res) => {
     const {
         creator_slack_id,
@@ -187,16 +279,16 @@ app.post("/insertStandup", async (req, res) => {
                 return executeOperation(
                     {
                         slackuser_id: members[index],
-                        slack_timestamp_id: result.ts + '',
+                        slack_timestamp_id: result.ts,
                         standup_id: res1.data.insert_standup_one.id,
                         standup_run_id: res3.data.insert_standup_run_one.id,
                         question_id: questionIDs[0]
                     },
                     HASURA_INSERT_RESPONSE_OPERATION
-                )
-            })
+                );
+            });
             let results2 = await Promise.all(requests2);
-            results2.forEach(result => console.log(result.data.id || 'error'));
+            results2.forEach(result => console.log(result));
             // console.log(results2);
         },
         null,
@@ -455,6 +547,65 @@ app.post("/unpauseStandup", async (req, res) => {
         ...res1.data.update_standup_by_pk
     });
 });
+
+app.post("/insertQuestion", async (req, res) => {
+    const { standup_id, body } = req.body.input;
+    let res1 = await executeOperation(
+        { standup_id },
+        HASURA_FETCH_ACTIVEQUESTIONS_OPERATION
+    );
+    if (res1.errors) {
+        return res.status(400).json(res1.errors[0]);
+    }
+    let maxIndex = -1;
+    res1.data.question.forEach(ques => {
+        if (ques.index > maxIndex) maxIndex = ques.index;
+    });
+    let res2 = await executeOperation(
+        {
+            standup_id,
+            body,
+            index: maxIndex + 1
+        },
+        HASURA_INSERT_QUESTION_OPERATION
+    );
+    if (res2.errors) {
+        return res.status(400).json(res2.errors[0]);
+    }
+    return res.json({ ...res2.data.insert_question_one });
+});
+
+app.post("/deleteQuestion", async (req, res) => {
+    const { question_id } = req.body.input;
+
+    let res1 = await executeOperation(
+        {
+            question_id
+        },
+        HASURA_FETCH_QUESTION_OPERATION
+    );
+
+    if (res1.errors) {
+        return res.status(400).json(res1.errors[0]);
+    }
+    let index = res1.data.question[0].index;
+    let standup_id = res1.data.question[0].standup_id;
+    let res2 = await executeOperation(
+        { standup_id, index },
+        HASURA_UPDATE_QUESTIONWITHHIGHERINDEX_OPERATION
+    );
+    if (res2.errors) {
+        return res.status(400).json(res2.errors[0]);
+    }
+    let res3 = await executeOperation(
+        { question_id },
+        HASURA_ARCHIVE_QUESTION_OPERATION
+    );
+    if (res3.errors) {
+        return res.status(400).json(res3.errors[0]);
+    }
+    return res.json({ ...res3.data.update_question });
+})
 app.listen(PORT, function () {
     console.log("Server is listening on port " + PORT);
 });
