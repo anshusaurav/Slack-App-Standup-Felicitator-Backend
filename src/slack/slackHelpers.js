@@ -29,4 +29,4 @@ const getAllMembersUsingCursor = async (channel, members, cursor) => {
     return members;
 }
 
-module.exports = { getChannelsUsingCursor, getAllMembersUsingCursor };
+module.exports = {getChannelsUsingCursor, getAllMembersUsingCursor};
