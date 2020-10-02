@@ -57,19 +57,26 @@ const getCronAsString = (string) => {
   const min = tokens[0];
   const hour = tokens[1];
   const dayTokens = tokens[4].split(',').map(elem => +elem);
+  // console.log(dayTokens);
   const week = ["Sun", "Mon", "Tue", "Wed", "Thur", "Fri", "Sat"];
-  let resDays = week.filter((day, index) => dayTokens.includes(index));
-  console.log(resDays);
+  let resDays = week.filter((day, index) => dayTokens.includes(index));//dayTokens.map(day=> week[day]);//week.filter((day, index) => dayTokens.includes(index));
+  // console.log('here',resDays);
   let dayStr = "";
+
   if (resDays.length === 1)
     dayStr = resDays[0];
   else if (resDays.length === 2)
     dayStr = resDays[0] + " and " + resDays[1]
+  else if (resDays.length === 7) {
+    dayStr = "All days"
+  }
   else {
     for (let i = 0; i < resDays.length - 2; i++) {
-      dayStr = resDays[i] + ", ";
+      dayStr += resDays[i] + ", ";
     }
+    // console.log('b', dayStr);
     dayStr += resDays[resDays.length - 2] + " and " + resDays[resDays.length - 1];
+    // console.log('a', dayStr);
   }
   return ('0' + hour).slice(-2) + ':' + ('0' + min).slice(-2) + " on " + dayStr;
 }
