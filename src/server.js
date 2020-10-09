@@ -42,6 +42,7 @@ const {
   HASURA_FIND_RESPONSE_OPERATION,
   HASURA_FETCH_STANDUP_OPERATION
 } = require("./graphql/queries");
+const { openModal, submitModal } = require("./slack/slackActions");
 const { getAllMembersUsingCursor } = require("./slack/slackHelpers");
 
 const crons = {};
@@ -51,15 +52,19 @@ const PORT = process.env.PORT || 3000;
 //UTWLKG02K
 const app = express();
 const slackEvents = createEventAdapter(process.env.SLACK_SIGNING_SECRET);
-// const slackInteractions = createMessageAdapter(
-//   process.env.SLACK_SIGNING_SECRET
-// );
+const slackInteractions = createMessageAdapter(
+  process.env.SLACK_SIGNING_SECRET
+);
 const web = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 app.use("/slack/events", slackEvents.expressMiddleware());
+app.use("/slack/actions", slackInteractions.expressMiddleware());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
+slackInteractions.action({ actionId: "open_modal_button" }, openModal);
+
+slackInteractions.viewSubmission("answer_modal_submit", submitModal);
 
 slackEvents.on("message", async event => {
   //When any message is sent on user-bot channel, check if its a bot msg or a user msg
@@ -270,6 +275,7 @@ app.post("/insertStandup", async (req, res) => {
     questions,
     timezone
   } = req.body.input;
+  console.log(questions);
   let res1 = await executeOperation(
     {
       creator_slack_id,
@@ -281,10 +287,10 @@ app.post("/insertStandup", async (req, res) => {
     },
     HASURA_INSERT_STANDUP_OPERATION
   );
+
   if (res1.errors) {
     return res.status(400).json(res1.errors[0]);
   }
-
   let questionRequests = questions.map((question, index) => {
     return executeOperation(
       {
@@ -295,26 +301,35 @@ app.post("/insertStandup", async (req, res) => {
       HASURA_INSERT_QUESTION_OPERATION
     );
   });
+
   let questionRes = await Promise.all(questionRequests);
+  // questionRes.map( r => console.log(r.errors));
+
   if (questionRes.errors) {
     return res.status(400).json(questionRes.errors[0]);
   }
+  // console.log(questionRes);
   let questionIDs = questionRes.map(q => q.data.insert_question_one.id);
-
+  // console.log(questionIDs);
   let res2 = await executeOperation(
     {
       standup_id: res1.data.insert_standup_one.id
     },
     HASURA_INSERT_CRONJOB_OPERATION
   );
+
   if (res2.errors) {
     return res.status(400).json(res2.errors[0]);
   }
   console.log("Cronjob added with id:" + res2.data.insert_cronjob_one.id);
-
+  // scheduling cron job as per cron provided
   crons[res2.data.insert_cronjob_one.id] = new CronJob(
     cron_text,
     async () => {
+      const stamp = timeStamp();
+      console.log(
+        `Time: ${stamp} Standup :{name: ${name}, channel: ${channel},  message: ${message}`
+      );
       let res3 = await executeOperation(
         { standup_id: res1.data.insert_standup_one.id },
         HASURA_INSERT_STANDUPRUN_OPERATION
@@ -326,6 +341,7 @@ app.post("/insertStandup", async (req, res) => {
       let members = await getAllMembersUsingCursor(channel);
       let requests1 = members.map(member =>
         web.users.info({ user: member }).then(userRes => {
+          // console.log(userRes);
           return web.chat.postMessage({
             blocks: standupInitBlock({
               name,
@@ -353,6 +369,7 @@ app.post("/insertStandup", async (req, res) => {
       });
       let results2 = await Promise.all(requests2);
       results2.forEach(result => console.log('Standup msg sent'));
+      // console.log(results2);
     },
     null,
     true,
@@ -436,12 +453,12 @@ app.post("/deleteStandup", async (req, res) => {
   if (res3.errors) {
     return res.status(400).json(res3.errors[0]);
   }
+
   if (res3.data.cronjob.length) {
     if (crons[res3.data.cronjob[0].id])
       crons[res3.data.cronjob[0].id].stop();
     console.log("Cronjob removed with id:" + res3.data.cronjob[0].id);
   }
-
   const res2 = await executeOperation(
     { standup_id },
     HASURA_DELETE_CRONJOB_OPERATION
@@ -455,9 +472,11 @@ app.post("/deleteStandup", async (req, res) => {
     { standup_id },
     HASURA_DELETE_STANDUP_OPERATION
   );
+  // console.log(res1);
   if (res1.errors) {
     return res.status(400).json(res1.errors[0]);
   }
+  // success
   return res.json({
     ...res1.data.update_standup
   });

@@ -46,6 +46,11 @@ const randomGreeting = () => {
   return greetings[Math.floor(Math.random() * greetings.length)];
 };
 
+const trimTitle = (string, length) => {
+  let trimmedString =
+    string.length > length ? string.substring(0, length - 3) + "..." : string;
+  return trimmedString;
+};
 
 const getCronAsString = (string) =>{
   const tokens = string.split(' ');
@@ -53,8 +58,10 @@ const getCronAsString = (string) =>{
   const hour = tokens[1];
   const dayTokens = tokens[4].split(',').map(elem=>+elem);
   dayTokens.sort((a,b)=>a-b);
+  // console.log(dayTokens);
   const week = ["Sun", "Mon", "Tue", "Wed", "Thur", "Fri", "Sat"];
   let resDays = week.filter((day, index) => dayTokens.includes(index));//dayTokens.map(day=> week[day]);//week.filter((day, index) => dayTokens.includes(index));
+  // console.log('here',resDays);
   let dayStr = "";
   
   if(resDays.length === 1)
@@ -68,6 +75,7 @@ const getCronAsString = (string) =>{
     for(let i = 0; i < resDays.length-2; i++){
       dayStr += resDays[i]+", ";
     }
+    // console.log('b', dayStr);
     dayStr += resDays[resDays.length-2]+ " and "+ resDays[resDays.length-1];
     // console.log('a', dayStr);
   }
