@@ -16,7 +16,7 @@ const HASURA_FETCH_STANDUP_OPERATION = `query getStandup($standup_id: uuid!){
     `;
 
 const HASURA_INSERT_STANDUP_OPERATION = `
-  mutation insertStandup($creator_slack_id:String!, $name: String!, $cron_text: String!, $channel: String!, $message: String!, $timezone: String! ) {
+  mutation insertStandup($creator_slack_id:String!, $name: String!, $cron_text: String!, $channel: String!, $message: String!, $timezone: String!, $token: String! ) {
     insert_standup_one(
       object: {
         creator_slack_id: $creator_slack_id
@@ -25,6 +25,7 @@ const HASURA_INSERT_STANDUP_OPERATION = `
         channel:$channel
         message: $message
         timezone: $timezone
+        token: $token
       }) {
       id
       name
@@ -300,6 +301,31 @@ mutation archiveQuestion($question_id: uuid!) {
     affected_rows
   }
 }`;
+const FETCH_WORKSPACE = `
+query findWorkspace($slack_id: String!) {
+  workspace_by_pk(slack_id: $slack_id){
+    slack_id
+    token
+  }
+}
+`
+
+const CREATE_WORKSPACE = `
+mutation createWorkspace($slack_id:String!, $token: String!){
+  insert_workspace_one(object: {slack_id: $slack_id, token: $token}){
+    slack_id
+    token
+  }
+}
+`
+
+const UPDATE_WORKSPACE = `
+mutation updateWorkspace($slack_id: String!, $token: String!) {
+  update_workspace_by_pk(pk_columns: {slack_id: $slack_id}, _set: {token: $token}){
+    slack_id
+    token
+  }
+}`
 module.exports = {
   HASURA_FETCH_STANDUP_OPERATION,
   HASURA_INSERT_STANDUP_OPERATION,
@@ -323,5 +349,8 @@ module.exports = {
   HASURA_FETCH_ACTIVEQUESTIONS_OPERATION,
   HASURA_FETCH_QUESTION_OPERATION,
   HASURA_UPDATE_QUESTIONWITHHIGHERINDEX_OPERATION,
-  HASURA_ARCHIVE_QUESTION_OPERATION
+  HASURA_ARCHIVE_QUESTION_OPERATION,
+  FETCH_WORKSPACE,
+  CREATE_WORKSPACE,
+  UPDATE_WORKSPACE
 };

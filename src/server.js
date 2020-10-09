@@ -1,4 +1,3 @@
-
 const express = require("express");
 const bodyParser = require("body-parser");
 const CronJob = require("cron").CronJob;
@@ -40,9 +39,9 @@ const {
   HASURA_UPDATE_QUESTIONWITHHIGHERINDEX_OPERATION,
   HASURA_ARCHIVE_QUESTION_OPERATION,
   HASURA_FIND_RESPONSE_OPERATION,
-  HASURA_FETCH_STANDUP_OPERATION
+  HASURA_FETCH_STANDUP_OPERATION,
+  FETCH_WORKSPACE
 } = require("./graphql/queries");
-const { openModal, submitModal } = require("./slack/slackActions");
 const { getAllMembersUsingCursor } = require("./slack/slackHelpers");
 
 const crons = {};
@@ -52,23 +51,16 @@ const PORT = process.env.PORT || 3000;
 //UTWLKG02K
 const app = express();
 const slackEvents = createEventAdapter(process.env.SLACK_SIGNING_SECRET);
-const slackInteractions = createMessageAdapter(
-  process.env.SLACK_SIGNING_SECRET
-);
-const web = new WebClient(process.env.SLACK_BOT_TOKEN);
+
+let web = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 app.use("/slack/events", slackEvents.expressMiddleware());
-app.use("/slack/actions", slackInteractions.expressMiddleware());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-slackInteractions.action({ actionId: "open_modal_button" }, openModal);
-
-slackInteractions.viewSubmission("answer_modal_submit", submitModal);
-
 slackEvents.on("message", async event => {
   //When any message is sent on user-bot channel, check if its a bot msg or a user msg
-
+  console.log(event)
   const { channel } = event;
   const body = event.text;
   if (event.bot_id) {
@@ -76,11 +68,21 @@ slackEvents.on("message", async event => {
     return;
   }
   console.log("User msg");
+  console.log(event);
+  const { team } = event;
+  const checkUserRes = await executeOperation({ slack_id: team }, FETCH_WORKSPACE);
+  if (!checkUserRes.data.workspace_by_pk)
+    return;
+  console.log(checkUserRes);
+  const { token } = checkUserRes.data.workspace_by_pk;
+
+  const webClient = new WebClient(token);
   //Fetch last 2 messages
-  let res1 = await web.conversations.history({ channel, limit: 2 });
+  let res1 = await webClient.conversations.history({ channel, limit: 2 });
   if (res1.errors || res1.messages.length < 2) {
     return;
   }
+  console.log('HERE');
   const botMsg = res1.messages[1];
   if (!res1.messages[1].bot_id) {
     return;
@@ -129,56 +131,55 @@ slackEvents.on("message", async event => {
     console.log("Cant fetch next question");
     return;
   }
-
-  console.log("----------------------\n", res4.data.question);
+  console.log('HERE2', slackuser_id);
   if (!res4.data.question.length) {
-    let endRes = await web.chat.postMessage({
+    let endRes = await webClient.chat.postMessage({
       blocks: standupEndBlocks({}),
       channel: slackuser_id
     });
 
     //Fetch all questions
-    let questionsRes = await executeOperation({
-      standup_id: res2.data.response[0].standup_id
-    }, HASURA_FETCH_ACTIVEQUESTIONS_OPERATION);
-
-    console.log(questionsRes);
-
+    let questionsRes = await executeOperation(
+      {
+        standup_id: res2.data.response[0].standup_id
+      },
+      HASURA_FETCH_ACTIVEQUESTIONS_OPERATION
+    );
+    console.log('4');
     const questions = questionsRes.data.question.map(singleQ => singleQ.body);
-    console.log(questions)
 
     const responseRequests = questionsRes.data.question.map(singleQ => {
-      console.log(slackuser_id, res2.data.response[0].standup_id, res2.data.response[0].standup_run_id, singleQ.id)
-      return (
-        executeOperation({
+
+      return executeOperation(
+        {
           slackuser_id,
           standup_id: res2.data.response[0].standup_id,
           standup_run_id: res2.data.response[0].standup_run_id,
-          question_id: singleQ.id,
-        }, HASURA_FIND_RESPONSE_OPERATION)
-
-      )
+          question_id: singleQ.id
+        },
+        HASURA_FIND_RESPONSE_OPERATION
+      );
     });
     let responsesRes = await Promise.all(responseRequests);
 
-    // console.log(responsesRes.map(obj =>obj.data.response));
     const answers = responsesRes.map(obj => obj.data.response[0].body);
     console.log(answers);
 
     let standupRes = await executeOperation({
       standup_id: res2.data.response[0].standup_id
     }, HASURA_FETCH_STANDUP_OPERATION);
-    // console.log(standupRes.data.standup[0]);
     const standup_name = standupRes.data.standup[0].name;
     const creator_slack_id = standupRes.data.standup[0].creator_slack_id;
 
-    let userRes = await web.users.info({ user: slackuser_id });
-
+    let userRes = await webClient.users.info({ user: slackuser_id });
     const user_name = userRes.user.real_name;
-    console.log(user_name, standup_name, creator_slack_id, questions, answers);
-
-    let notifyRes = await web.chat.postMessage({
-      blocks: notifyResponseBlocks({ questions, answers, user_name, standup_name }),
+    let notifyRes = await webClient.chat.postMessage({
+      blocks: notifyResponseBlocks({
+        questions,
+        answers,
+        user_name,
+        standup_name
+      }),
       channel: creator_slack_id
     });
 
@@ -187,15 +188,15 @@ slackEvents.on("message", async event => {
     }
     //Fetch all responses
 
-    // make two array of questions and answer 
+    // make two array of questions and answer
 
     //get user name get standupname and questions and answer pass in context to get this block and sent it to channel: creator
 
     console.log("Send thank you message");
     return;
   }
-
-  let res5 = await web.chat.postMessage({
+  console.log('3');
+  let res5 = await webClient.chat.postMessage({
     blocks: standupSubsequentBlocks({
       question: res4.data.question[0].body
     }),
@@ -222,11 +223,6 @@ slackEvents.on("message", async event => {
   return;
 });
 
-
-
-
-
-
 slackEvents.on("app_mention", async event => {
   console.log("menioned");
 
@@ -242,8 +238,6 @@ slackEvents.on("app_mention", async event => {
       }
     });
 });
-
-
 
 // slackEvents.on("app_home_opened", async event => {
 //   const userId = event.user;
@@ -263,7 +257,6 @@ slackEvents.on("app_mention", async event => {
 // }
 // });
 
-
 // Request Handlers
 app.post("/insertStandup", async (req, res) => {
   const {
@@ -273,9 +266,9 @@ app.post("/insertStandup", async (req, res) => {
     channel,
     message,
     questions,
-    timezone
+    timezone,
+    token
   } = req.body.input;
-  console.log(questions);
   let res1 = await executeOperation(
     {
       creator_slack_id,
@@ -283,14 +276,16 @@ app.post("/insertStandup", async (req, res) => {
       cron_text,
       channel,
       message,
-      timezone
+      timezone,
+      token
     },
     HASURA_INSERT_STANDUP_OPERATION
   );
-
+  const webClient = new WebClient(token);
   if (res1.errors) {
     return res.status(400).json(res1.errors[0]);
   }
+
   let questionRequests = questions.map((question, index) => {
     return executeOperation(
       {
@@ -301,35 +296,26 @@ app.post("/insertStandup", async (req, res) => {
       HASURA_INSERT_QUESTION_OPERATION
     );
   });
-
   let questionRes = await Promise.all(questionRequests);
-  // questionRes.map( r => console.log(r.errors));
-
   if (questionRes.errors) {
     return res.status(400).json(questionRes.errors[0]);
   }
-  // console.log(questionRes);
   let questionIDs = questionRes.map(q => q.data.insert_question_one.id);
-  // console.log(questionIDs);
+
   let res2 = await executeOperation(
     {
       standup_id: res1.data.insert_standup_one.id
     },
     HASURA_INSERT_CRONJOB_OPERATION
   );
-
   if (res2.errors) {
     return res.status(400).json(res2.errors[0]);
   }
   console.log("Cronjob added with id:" + res2.data.insert_cronjob_one.id);
-  // scheduling cron job as per cron provided
+
   crons[res2.data.insert_cronjob_one.id] = new CronJob(
     cron_text,
     async () => {
-      const stamp = timeStamp();
-      console.log(
-        `Time: ${stamp} Standup :{name: ${name}, channel: ${channel},  message: ${message}`
-      );
       let res3 = await executeOperation(
         { standup_id: res1.data.insert_standup_one.id },
         HASURA_INSERT_STANDUPRUN_OPERATION
@@ -337,12 +323,10 @@ app.post("/insertStandup", async (req, res) => {
       if (res3.errors) {
         return res.status(400).json(res3.errors[0]);
       }
-
-      let members = await getAllMembersUsingCursor(channel);
+      let members = await getAllMembersUsingCursor(token, channel);
       let requests1 = members.map(member =>
-        web.users.info({ user: member }).then(userRes => {
-          // console.log(userRes);
-          return web.chat.postMessage({
+        webClient.users.info({ user: member }).then(userRes => {
+          return webClient.chat.postMessage({
             blocks: standupInitBlock({
               name,
               message,
@@ -355,6 +339,7 @@ app.post("/insertStandup", async (req, res) => {
       );
 
       let results1 = await Promise.all(requests1);
+      console.log(results1);
       let requests2 = results1.map((result, index) => {
         return executeOperation(
           {
@@ -368,17 +353,16 @@ app.post("/insertStandup", async (req, res) => {
         );
       });
       let results2 = await Promise.all(requests2);
-      results2.forEach(result => console.log('Standup msg sent'));
-      // console.log(results2);
+      results2.forEach(result => console.log("Standup msg sent"));
     },
     null,
     true,
     timezone
   );
-  //send notification to creator of standup
-  web.users.info({ user: creator_slack_id }).then(creatorRes => {
-    web.conversations.info({ channel }).then(channelRes => {
-      web.chat.postMessage({
+  // send notification to creator of standup
+  webClient.users.info({ user: creator_slack_id }).then(creatorRes => {
+    webClient.conversations.info({ channel }).then(channelRes => {
+      webClient.chat.postMessage({
         blocks: standupCreateBlock({
           creator_slack_id: creatorRes.user.real_name,
           name,
@@ -391,13 +375,13 @@ app.post("/insertStandup", async (req, res) => {
   });
 
   //send notification in im to all channel members
-  web.conversations.members({ channel }).then(response => {
+  webClient.conversations.members({ channel }).then(response => {
     let requests = response.members.map(member =>
-      web.users.info({ user: member }).then(userRes => {
-        web.conversations.info({ channel }).then(channelRes => {
-          web.users.info({ user: creator_slack_id }).then(creatorRes => {
+      webClient.users.info({ user: member }).then(userRes => {
+        webClient.conversations.info({ channel }).then(channelRes => {
+          webClient.users.info({ user: creator_slack_id }).then(creatorRes => {
             if (creator_slack_id !== member)
-              web.chat.postMessage({
+              webClient.chat.postMessage({
                 blocks: standupNotifyBlock({
                   name,
                   username: userRes.user.name,
@@ -413,9 +397,9 @@ app.post("/insertStandup", async (req, res) => {
     );
 
     //send channel message informing about standup
-    web.conversations.info({ channel }).then(channelRes => {
-      web.users.info({ user: creator_slack_id }).then(creatorRes => {
-        web.chat.postMessage({
+    webClient.conversations.info({ channel }).then(channelRes => {
+      webClient.users.info({ user: creator_slack_id }).then(creatorRes => {
+        webClient.chat.postMessage({
           blocks: channelNotifyBlock({
             name,
             creator_slack_id: creatorRes.user.name,
@@ -453,12 +437,11 @@ app.post("/deleteStandup", async (req, res) => {
   if (res3.errors) {
     return res.status(400).json(res3.errors[0]);
   }
-
   if (res3.data.cronjob.length) {
-    if (crons[res3.data.cronjob[0].id])
-      crons[res3.data.cronjob[0].id].stop();
+    if (crons[res3.data.cronjob[0].id]) crons[res3.data.cronjob[0].id].stop();
     console.log("Cronjob removed with id:" + res3.data.cronjob[0].id);
   }
+
   const res2 = await executeOperation(
     { standup_id },
     HASURA_DELETE_CRONJOB_OPERATION
@@ -472,11 +455,9 @@ app.post("/deleteStandup", async (req, res) => {
     { standup_id },
     HASURA_DELETE_STANDUP_OPERATION
   );
-  // console.log(res1);
   if (res1.errors) {
     return res.status(400).json(res1.errors[0]);
   }
-  // success
   return res.json({
     ...res1.data.update_standup
   });
@@ -552,9 +533,9 @@ app.post("/updateStandup", async (req, res) => {
                   channel: member
                 })
               );
-              console.log(requests);
+              // console.log(requests);
               Promise.all(requests).then(res =>
-                res.forEach(resp => console.log("Res ", resp))
+                res.forEach(resp => console.log("Res "))
               );
             });
           });
@@ -572,6 +553,7 @@ app.post("/updateStandup", async (req, res) => {
 });
 
 app.post("/pauseStandup", async (req, res) => {
+  console.log('HERE');
   const { standup_id } = req.body.input;
 
   let res1 = await executeOperation(
@@ -589,10 +571,12 @@ app.post("/pauseStandup", async (req, res) => {
     return res.status(400).json(res2.errors[0]);
   }
 
-  // console.log(res1.data);
+  console.log('PPP', res1.data);
   if (res2.data.cronjob.length > 0) {
-    crons[res2.data.cronjob[0].id].stop();
-    console.log("Cronjob paused with id:" + res2.data.cronjob[0].id);
+    if (crons[res2.data.cronjob[0].id]) {
+      crons[res2.data.cronjob[0].id].stop();
+      console.log("Cronjob paused with id:" + res2.data.cronjob[0].id);
+    }
   }
 
   return res.json({
@@ -621,8 +605,10 @@ app.post("/unpauseStandup", async (req, res) => {
 
   // console.log(res1.data);
   if (res2.data.cronjob.length > 0) {
-    crons[res2.data.cronjob[0].id].start();
-    console.log("Cronjob unpaused with id:" + res2.data.cronjob[0].id);
+    if (crons[res2.data.cronjob[0].id]) {
+      crons[res2.data.cronjob[0].id].start();
+      console.log("Cronjob unpaused with id:" + res2.data.cronjob[0].id);
+    }
   }
   return res.json({
     ...res1.data.update_standup_by_pk
@@ -686,7 +672,48 @@ app.post("/deleteQuestion", async (req, res) => {
     return res.status(400).json(res3.errors[0]);
   }
   return res.json({ ...res3.data.update_question });
-})
+});
+//Sunny's code(Suraj Kumar Choudhary)
+// app.post("/getMembers", async (req, res) => {
+//   const { channel } = req.body.input;
+//   const members = await getAllMembersUsingCursor(channel);
+//   const requests = members.map(async member => {
+//     return await web.users.info({ user: member });
+//   });
+
+//   const results = await Promise.all(requests);
+//   // console.log(results);
+//   const { images, real_names, ids } = results.reduce(
+//     (
+//       final_result,
+//       {
+//         user: {
+//           id,
+//           real_name,
+//           profile: { image_72 },
+//           is_bot
+//         }
+//       }
+//     ) => {
+//       final_result["images"] = final_result["images"] || [];
+//       final_result["real_names"] = final_result["real_names"] || [];
+//       final_result["ids"] = final_result["ids"] || [];
+//       if (!is_bot) {
+//         final_result["ids"].push(id);
+//         final_result["images"].push(image_72);
+//         final_result["real_names"].push(real_name);
+//       }
+//       return final_result;
+//     },
+//     {}
+//   );
+
+//   return res.json({
+//     ids,
+//     real_names,
+//     images
+//   });
+// });
 app.listen(PORT, function () {
   console.log("Server is listening on port " + PORT);
 });
